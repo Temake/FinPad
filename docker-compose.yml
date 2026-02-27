@@ -1,0 +1,46 @@
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: finpad_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: finpad
+      POSTGRES_PASSWORD: finpad
+      POSTGRES_DB: finpad
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: finpad_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Evolution API (WhatsApp Gateway)
+  evolution-api:
+    image: atendai/evolution-api:latest
+    container_name: finpad_evolution
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:-change-me}
+      - DATABASE_ENABLED=true
+      - DATABASE_PROVIDER=postgresql
+      - DATABASE_CONNECTION_URI=postgresql://finpad:finpad@db:5432/evolution
+    volumes:
+      - evolution_instances:/evolution/instances
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:
+  redis_data:
+  evolution_instances:
