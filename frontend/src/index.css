@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+/* FinPad custom styles */
+:root {
+  --color-primary: #10b981;
+  --color-primary-dark: #059669;
+  --color-background: #f9fafb;
+  --color-surface: #ffffff;
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-background);
+  color: var(--color-text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
