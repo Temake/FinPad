@@ -43,3 +43,37 @@ export interface ExpenseUpdate {
   category_id?: number
   expense_date?: string
 }
+
+// AI-Powered Features
+export interface AIStatus {
+  configured: boolean
+  model: string
+  features: string[]
+}
+
+export interface ParsedExpense {
+  amount: number | null
+  description: string | null
+  category: string
+  category_id: number | null
+  confidence: number
+}
+
+export interface ReceiptData {
+  merchant: string | null
+  amount: number | null
+  items: string[]
+  date: string | null
+  category: string
+  category_id: number | null
+  confidence: number
+}
+
+export interface SmartExpenseCreate {
+  text?: string
+  amount?: number
+  description?: string
+  category_id?: number
+  expense_date?: string
+  use_ai?: boolean
+}

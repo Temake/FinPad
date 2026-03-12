@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { expensesApi } from '../services/api'
-import type { Expense, Category, ExpenseSummary } from '../types/expense'
+import type { Expense, Category, ExpenseSummary, ParsedExpense } from '../types/expense'
 
 type FilterPeriod = 'all' | 'today' | 'week' | 'month'
+type AddMode = 'manual' | 'smart' | 'receipt'
 
 export default function Expenses() {
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -12,6 +13,14 @@ export default function Expenses() {
   const [filter, setFilter] = useState<FilterPeriod>('month')
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
+  
+  // AI Features
+  const [addMode, setAddMode] = useState<AddMode>('smart')
+  const [smartText, setSmartText] = useState('')
+  const [isParsing, setIsParsing] = useState(false)
+  const [parsedExpense, setParsedExpense] = useState<ParsedExpense | null>(null)
+  const [aiConfigured, setAiConfigured] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Form state
   const [amount, setAmount] = useState('')
@@ -61,6 +70,13 @@ export default function Expenses() {
     }
   }
 
+  // Check if AI is configured
+  useEffect(() => {
+    expensesApi.aiStatus()
+      .then((res) => setAiConfigured(res.data.configured))
+      .catch(() => setAiConfigured(false))
+  }, [])
+
   useEffect(() => {
     fetchData()
   }, [filter])
@@ -69,6 +85,8 @@ export default function Expenses() {
     setAmount('')
     setDescription('')
     setCategoryId('')
+    setSmartText('')
+    setParsedExpense(null)
     setExpenseDate(new Date().toISOString().split('T')[0])
     setError('')
     setEditingExpense(null)
@@ -76,16 +94,78 @@ export default function Expenses() {
 
   const openAddModal = () => {
     resetForm()
+    setAddMode(aiConfigured ? 'smart' : 'manual')
     setShowAddModal(true)
   }
 
   const openEditModal = (expense: Expense) => {
     setEditingExpense(expense)
+    setAddMode('manual')  // Always manual mode when editing
     setAmount(expense.amount.toString())
     setDescription(expense.description || '')
     setCategoryId(expense.category_id || '')
     setExpenseDate(expense.expense_date)
     setShowAddModal(true)
+  }
+
+  // AI: Parse expense text
+  const handleSmartParse = async () => {
+    if (!smartText.trim()) return
+    
+    setIsParsing(true)
+    setError('')
+    try {
+      const res = await expensesApi.aiParse(smartText)
+      const parsed = res.data as ParsedExpense
+      setParsedExpense(parsed)
+      
+      // Pre-fill form with parsed data
+      if (parsed.amount) setAmount(parsed.amount.toString())
+      if (parsed.description) setDescription(parsed.description)
+      if (parsed.category_id) setCategoryId(parsed.category_id)
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } }
+      setError(error.response?.data?.detail || 'Failed to parse expense')
+    } finally {
+      setIsParsing(false)
+    }
+  }
+
+  // AI: Scan receipt
+  const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setIsParsing(true)
+    setError('')
+    try {
+      const res = await expensesApi.aiScanReceipt(file)
+      const data = res.data
+      
+      // Pre-fill form with extracted data
+      if (data.amount) setAmount(data.amount.toString())
+      if (data.merchant) setDescription(data.merchant + (data.items?.length ? ': ' + data.items.slice(0, 2).join(', ') : ''))
+      if (data.category_id) setCategoryId(data.category_id)
+      if (data.date) setExpenseDate(data.date)
+      
+      setParsedExpense({
+        amount: data.amount,
+        description: data.merchant,
+        category: data.category,
+        category_id: data.category_id,
+        confidence: data.confidence,
+      })
+      
+      // Switch to manual mode to show filled form
+      setAddMode('manual')
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { detail?: string } } }
+      setError(error.response?.data?.detail || 'Failed to scan receipt')
+    } finally {
+      setIsParsing(false)
+      // Reset file input
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -286,89 +366,233 @@ export default function Expenses() {
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              {error && (
-                <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg">
-                  {error}
-                </div>
-              )}
-
-              {/* Amount */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Amount (₦)
-                </label>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-lg"
-                  required
-                />
+            {/* Mode Tabs (only when adding, not editing) */}
+            {!editingExpense && aiConfigured && (
+              <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+                <button
+                  type="button"
+                  onClick={() => setAddMode('smart')}
+                  className={`flex-1 py-2 text-sm rounded-md transition-colors ${
+                    addMode === 'smart'
+                      ? 'bg-white text-emerald-700 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  ✨ Smart
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAddMode('receipt')}
+                  className={`flex-1 py-2 text-sm rounded-md transition-colors ${
+                    addMode === 'receipt'
+                      ? 'bg-white text-emerald-700 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  📸 Receipt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAddMode('manual')}
+                  className={`flex-1 py-2 text-sm rounded-md transition-colors ${
+                    addMode === 'manual'
+                      ? 'bg-white text-emerald-700 shadow-sm'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  ✏️ Manual
+                </button>
               </div>
+            )}
 
-              {/* Description */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Description (optional)
-                </label>
-                <input
-                  type="text"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="e.g. Lunch at Mr Biggs"
-                  className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
-                />
+            {error && (
+              <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg">
+                {error}
               </div>
+            )}
 
-              {/* Category */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Category
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {categories.map((cat) => (
+            {/* Smart Mode: Text input with AI parsing */}
+            {addMode === 'smart' && !editingExpense && (
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Describe your expense
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={smartText}
+                      onChange={(e) => setSmartText(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSmartParse()}
+                      placeholder="e.g. bought suya 2k"
+                      className="flex-1 px-4 py-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
                     <button
-                      key={cat.id}
                       type="button"
-                      onClick={() => setCategoryId(cat.id)}
-                      className={`p-2 rounded-lg border text-center transition-colors ${
-                        categoryId === cat.id
-                          ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-                          : 'border-gray-200 hover:bg-gray-50'
-                      }`}
+                      onClick={handleSmartParse}
+                      disabled={isParsing || !smartText.trim()}
+                      className="px-4 py-3 bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
                     >
-                      <span className="text-xl block">{cat.icon || '📦'}</span>
-                      <span className="text-xs truncate block">{cat.name}</span>
+                      {isParsing ? '...' : '✨'}
                     </button>
-                  ))}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    AI will extract amount, category, and details
+                  </p>
                 </div>
-              </div>
 
-              {/* Date */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Date
-                </label>
+                {/* Parsed Result Preview */}
+                {parsedExpense && (
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-emerald-700">AI Parsed</span>
+                      <span className="text-xs text-emerald-600">
+                        {Math.round(parsedExpense.confidence * 100)}% confident
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <span className="text-gray-500">Amount:</span>{' '}
+                        <span className="font-medium">₦{parsedExpense.amount?.toLocaleString() || '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-500">Category:</span>{' '}
+                        <span className="font-medium">{parsedExpense.category}</span>
+                      </div>
+                      {parsedExpense.description && (
+                        <div className="col-span-2">
+                          <span className="text-gray-500">Description:</span>{' '}
+                          <span className="font-medium">{parsedExpense.description}</span>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAddMode('manual')}
+                      className="text-xs text-emerald-700 underline mt-2"
+                    >
+                      Edit details →
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Receipt Mode: Upload image */}
+            {addMode === 'receipt' && !editingExpense && (
+              <div className="space-y-3">
                 <input
-                  type="date"
-                  value={expenseDate}
-                  onChange={(e) => setExpenseDate(e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleReceiptUpload}
+                  className="hidden"
                 />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isParsing}
+                  className="w-full py-8 border-2 border-dashed border-gray-300 rounded-xl text-gray-500 hover:border-emerald-500 hover:text-emerald-600 transition-colors"
+                >
+                  {isParsing ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Scanning receipt...
+                    </span>
+                  ) : (
+                    <span className="flex flex-col items-center gap-2">
+                      <span className="text-3xl">📸</span>
+                      <span>Tap to upload receipt</span>
+                      <span className="text-xs">JPEG, PNG, or WebP</span>
+                    </span>
+                  )}
+                </button>
               </div>
+            )}
 
-              {/* Submit */}
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full bg-emerald-600 text-white py-3 rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-              >
-                {isSubmitting ? 'Saving...' : editingExpense ? 'Update Expense' : 'Add Expense'}
-              </button>
-            </form>
+            {/* Manual Form */}
+            {(addMode === 'manual' || editingExpense || parsedExpense) && (
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {/* Amount */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Amount (₦)
+                  </label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-lg"
+                    required
+                  />
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Description (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="e.g. Lunch at Mr Biggs"
+                    className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+
+                {/* Category */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Category
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {categories.map((cat) => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setCategoryId(cat.id)}
+                        className={`p-2 rounded-lg border text-center transition-colors ${
+                          categoryId === cat.id
+                            ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                            : 'border-gray-200 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="text-xl block">{cat.icon || '📦'}</span>
+                        <span className="text-xs truncate block">{cat.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Date */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Date
+                  </label>
+                  <input
+                    type="date"
+                    value={expenseDate}
+                    onChange={(e) => setExpenseDate(e.target.value)}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500"
+                  />
+                </div>
+
+                {/* Submit */}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="w-full bg-emerald-600 text-white py-3 rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                >
+                  {isSubmitting ? 'Saving...' : editingExpense ? 'Update Expense' : 'Add Expense'}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}

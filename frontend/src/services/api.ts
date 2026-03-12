@@ -46,10 +46,10 @@ export const authApi = {
 // === Expenses API ===
 export const expensesApi = {
   create: (data: { amount: number; description?: string; category_id?: number; expense_date?: string }) =>
-    api.post('/expenses', data),
+    api.post('/expenses/', data),
 
   list: (params?: { start_date?: string; end_date?: string; category_id?: number; limit?: number; offset?: number }) =>
-    api.get('/expenses', { params }),
+    api.get('/expenses/', { params }),
 
   get: (id: number) =>
     api.get(`/expenses/${id}`),
@@ -65,6 +65,30 @@ export const expensesApi = {
 
   getCategories: () =>
     api.get('/expenses/categories'),
+
+  // === AI-Powered Features ===
+  aiStatus: () =>
+    api.get('/expenses/ai/status'),
+
+  aiParse: (text: string) =>
+    api.post('/expenses/ai/parse', { text }),
+
+  aiScanReceipt: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/expenses/ai/receipt', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
+  aiSmartCreate: (data: {
+    text?: string
+    amount?: number
+    description?: string
+    category_id?: number
+    expense_date?: string
+    use_ai?: boolean
+  }) => api.post('/expenses/ai/smart', data),
 }
 
 // === Categories API ===

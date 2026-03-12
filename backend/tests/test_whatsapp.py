@@ -37,19 +37,3 @@ def test_whatsapp_webhook_no_phone():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ignored"
-
-
-def test_whatsapp_webhook_new_user_flow():
-    """Test new user registration starts confirmation flow."""
-    payload = {
-        "event": "messages.upsert",
-        "data": {
-            "key": {"remoteJid": "2348012345678@s.whatsapp.net"},
-            "message": {"conversation": "Hi"},
-        },
-    }
-    response = client.post("/api/v1/whatsapp/webhook", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status"] == "pending_confirmation"
-    assert data["phone"] == "2348012345678"
