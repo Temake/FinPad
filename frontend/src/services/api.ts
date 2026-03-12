@@ -48,17 +48,23 @@ export const expensesApi = {
   create: (data: { amount: number; description?: string; category_id?: number; expense_date?: string }) =>
     api.post('/expenses', data),
 
-  list: (params?: { start_date?: string; end_date?: string; category_id?: number }) =>
+  list: (params?: { start_date?: string; end_date?: string; category_id?: number; limit?: number; offset?: number }) =>
     api.get('/expenses', { params }),
 
-  summary: (period: 'daily' | 'weekly' | 'monthly' = 'monthly') =>
-    api.get('/expenses/summary', { params: { period } }),
+  get: (id: number) =>
+    api.get(`/expenses/${id}`),
 
-  update: (id: number, data: Partial<{ amount: number; description: string; category_id: number }>) =>
+  summary: (period: 'daily' | 'weekly' | 'monthly' = 'monthly', target_date?: string) =>
+    api.get('/expenses/summary', { params: { period, target_date } }),
+
+  update: (id: number, data: Partial<{ amount: number; description: string; category_id: number; expense_date: string }>) =>
     api.put(`/expenses/${id}`, data),
 
   delete: (id: number) =>
     api.delete(`/expenses/${id}`),
+
+  getCategories: () =>
+    api.get('/expenses/categories'),
 }
 
 // === Categories API ===

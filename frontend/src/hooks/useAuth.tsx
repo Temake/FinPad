@@ -1,6 +1,22 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 import { authApi } from '../services/api'
 
+// Environment-based auth bypass for testing
+const BYPASS_AUTH = import.meta.env.VITE_BYPASS_AUTH === 'true'
+
+// Mock user for testing without backend
+const MOCK_USER = {
+  id: '1',
+  phone: '+2348012345678',
+  display_name: 'Test User',
+  currency: 'NGN',
+  notification_enabled: true,
+  daily_reminder_time: '20:00',
+  whatsapp_linked: true,
+  current_streak: 5,
+  level: 'Beginner Saver',
+}
+
 interface User {
   id: string
   phone: string
@@ -27,13 +43,15 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  // Initialize with mock data if bypass is enabled
+  const [user, setUser] = useState<User | null>(BYPASS_AUTH ? MOCK_USER : null)
   const [token, setToken] = useState<string | null>(() =>
-    localStorage.getItem('finpad_token')
+    BYPASS_AUTH ? 'mock-token' : localStorage.getItem('finpad_token')
   )
-  const [isLoading, setIsLoading] = useState(true)
+  const [isLoading, setIsLoading] = useState(BYPASS_AUTH ? false : true)
 
   const logout = useCallback(() => {
+    if (BYPASS_AUTH) return
     setToken(null)
     setUser(null)
     localStorage.removeItem('finpad_token')
@@ -41,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshUser = useCallback(async () => {
+    if (BYPASS_AUTH) return
     try {
       const res = await authApi.getMe()
       setUser(res.data)
@@ -51,6 +70,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // On mount: check if token exists and fetch user
   useEffect(() => {
+    // Skip initialization if bypassing auth
+    if (BYPASS_AUTH) {
+      console.log('Auth bypassed - using mock user')
+      return
+    }
+
     const init = async () => {
       if (token) {
         try {
@@ -82,11 +107,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const requestOTP = async (phone: string) => {
+    if (BYPASS_AUTH) return { message: 'Mock OTP sent', debug_otp: '123456' }
     const res = await authApi.requestOTP(phone)
     return res.data
   }
 
   const verifyOTP = async (phone: string, otp: string) => {
+    if (BYPASS_AUTH) return
     const res = await authApi.verifyOTP(phone, otp)
     const { access_token, refresh_token } = res.data
 
@@ -105,7 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         token,
         isLoading,
-        isAuthenticated: !!token && !!user,
+        isAuthenticated: BYPASS_AUTH ? true : (!!token && !!user),
         requestOTP,
         verifyOTP,
         logout,

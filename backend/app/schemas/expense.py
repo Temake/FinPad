@@ -28,7 +28,9 @@ class ExpenseResponse(BaseModel):
     currency: str
     description: str | None
     expense_date: date
+    category_id: int | None = None
     category_name: str | None = None
+    category_icon: str | None = None
     source: str
     created_at: str
 
@@ -41,3 +43,14 @@ class ExpenseSummary(BaseModel):
     count: int
     by_category: dict[str, float] = {}
     period: str  # "daily", "weekly", "monthly"
+    start_date: str
+    end_date: str
+
+
+class CategoryResponse(BaseModel):
+    """Category response."""
+    id: int
+    name: str
+    icon: str | None
+    color: str | None
+    is_custom: bool
