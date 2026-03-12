@@ -6,6 +6,13 @@ from app.core.config import get_settings
 settings = get_settings()
 
 
+def _format_currency(amount: float) -> str:
+    """Format amount as Nigerian Naira."""
+    if amount >= 1000:
+        return f"₦{amount:,.0f}"
+    return f"₦{amount:.2f}"
+
+
 class WhatsAppService:
     """Send messages via Evolution API (self-hosted WhatsApp gateway)."""
 
@@ -67,5 +74,41 @@ class WhatsAppService:
             "Don't forget to log today's expenses!\n\n"
             "Just tell me what you spent, e.g.:\n"
             "\"Spent 1500 on transport\""
+        )
+        return await self.send_text(phone, message)
+
+    async def send_weekly_summary(
+        self, phone: str, total: float, count: int, top_category: str | None = None
+    ) -> bool:
+        """Send weekly spending summary."""
+        top_part = f"\n🏷️ Top category: {top_category}" if top_category else ""
+        message = (
+            f"📊 *Weekly Summary*\n\n"
+            f"You spent *{_format_currency(total)}* this week\n"
+            f"📝 {count} transaction{'s' if count != 1 else ''}{top_part}\n\n"
+            f"Keep tracking to stay on top of your finances! 💪"
+        )
+        return await self.send_text(phone, message)
+
+    async def send_streak_achievement(self, phone: str, days: int) -> bool:
+        """Send streak achievement notification."""
+        emoji = "🔥" if days >= 7 else "⭐"
+        if days == 7:
+            msg = f"{emoji} *7-Day Streak!*\n\nYou've logged expenses for a whole week! Keep it up!"
+        elif days == 30:
+            msg = f"🏆 *30-Day Streak!*\n\nIncredible! A full month of tracking. You're a finance pro!"
+        else:
+            msg = f"{emoji} *{days}-Day Streak!*\n\nYou've logged expenses {days} days in a row!"
+        return await self.send_text(phone, msg)
+
+    async def send_expense_confirmation(
+        self, phone: str, amount: float, description: str, category: str
+    ) -> bool:
+        """Send expense logged confirmation."""
+        message = (
+            f"✅ *Expense Logged!*\n\n"
+            f"💵 Amount: *{_format_currency(amount)}*\n"
+            f"📝 {description}\n"
+            f"🏷️ Category: {category}"
         )
         return await self.send_text(phone, message)
