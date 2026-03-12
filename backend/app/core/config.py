@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     S3_SECRET_KEY: str = ""
     S3_BUCKET: str = "finpad-receipts"
 
+    # AI / Gemini
+    GEMINI_API_KEY: str = ""
+    AI_MODEL: str = "gemini-2.5-preview"  # Fast and cheap, good for parsing
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

@@ -1,9 +1,9 @@
-"""Expense routes - CRUD and summary endpoints."""
+"""Expense routes - CRUD, summary, and AI-powered endpoints."""
 
 from datetime import date
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, status
 
 from app.api.deps import CurrentUserId, DbSession
 from app.schemas.expense import (
@@ -13,8 +13,18 @@ from app.schemas.expense import (
     ExpenseSummary,
     CategoryResponse,
 )
+from app.schemas.ai import (
+    ParseExpenseRequest,
+    ParsedExpenseResponse,
+    ReceiptUploadResponse,
+    SmartExpenseCreate,
+    AIStatusResponse,
+)
 from app.services import expense_service
+from app.core import ai_service
+from app.core.config import get_settings
 
+settings = get_settings()
 router = APIRouter()
 
 
@@ -131,3 +141,159 @@ def _expense_to_response(expense) -> ExpenseResponse:
         source=expense.source.value,
         created_at=expense.created_at.isoformat(),
     )
+
+
+async def _find_category_id(db: DbSession, user_id, category_name: str) -> int | None:
+    """Find category ID by name."""
+    categories = await expense_service.get_all_categories(db, user_id)
+    for cat in categories:
+        if cat.name.lower() == category_name.lower():
+            return cat.id
+    return None
+
+
+# ============== AI-Powered Endpoints ==============
+
+@router.get("/ai/status", response_model=AIStatusResponse)
+async def ai_status():
+    """Check if AI features are available."""
+    return AIStatusResponse(
+        configured=ai_service.is_ai_configured(),
+        model=settings.AI_MODEL,
+        features=["parse_text", "receipt_ocr", "smart_create"] if ai_service.is_ai_configured() else [],
+    )
+
+
+@router.post("/ai/parse", response_model=ParsedExpenseResponse)
+async def parse_expense_text(
+    data: ParseExpenseRequest,
+    db: DbSession,
+    user_id: CurrentUserId,
+):
+    """
+    Parse natural language expense into structured data.
+    
+    Examples:
+    - "bought suya 2k" → {amount: 2000, category: "Food & Groceries", ...}
+    - "uber to VI 3500" → {amount: 3500, category: "Transport", ...}
+    """
+    if not ai_service.is_ai_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="AI service not configured. Set GEMINI_API_KEY in environment."
+        )
+    
+    result = await ai_service.parse_expense_text(data.text)
+    
+    # Find matching category ID
+    category_id = await _find_category_id(db, user_id, result["category"])
+    
+    return ParsedExpenseResponse(
+        amount=result["amount"],
+        description=result["description"],
+        category=result["category"],
+        category_id=category_id,
+        confidence=result["confidence"],
+    )
+
+
+@router.post("/ai/receipt", response_model=ReceiptUploadResponse)
+async def scan_receipt(
+    db: DbSession,
+    user_id: CurrentUserId,
+    file: UploadFile = File(..., description="Receipt image (JPEG/PNG)"),
+):
+    """
+    Extract expense data from a receipt image using AI OCR.
+    
+    Accepts JPEG or PNG images. Returns extracted merchant, amount, items, date.
+    """
+    if not ai_service.is_ai_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="AI service not configured. Set GEMINI_API_KEY in environment."
+        )
+    
+    # Validate file type
+    if file.content_type not in ["image/jpeg", "image/png", "image/webp"]:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file type. Only JPEG, PNG, and WebP images are supported."
+        )
+    
+    # Read image bytes
+    image_bytes = await file.read()
+    
+    # Limit file size (5MB)
+    if len(image_bytes) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Maximum size is 5MB.")
+    
+    result = await ai_service.extract_receipt_data(image_bytes)
+    
+    # Find matching category ID
+    category_id = await _find_category_id(db, user_id, result["category"])
+    
+    return ReceiptUploadResponse(
+        merchant=result["merchant"],
+        amount=result["amount"],
+        items=result["items"],
+        date=result["date"],
+        category=result["category"],
+        category_id=category_id,
+        confidence=result["confidence"],
+    )
+
+
+@router.post("/ai/smart", response_model=ExpenseResponse, status_code=status.HTTP_201_CREATED)
+async def smart_create_expense(
+    data: SmartExpenseCreate,
+    db: DbSession,
+    user_id: CurrentUserId,
+):
+    """
+    Create expense with AI assistance.
+    
+    If `use_ai=true` and `text` is provided, AI will parse the text to extract
+    amount, description, and category. Manual overrides take precedence.
+    """
+    amount = data.amount
+    description = data.description
+    category_id = data.category_id
+    expense_date_str = data.expense_date
+    
+    # Use AI to parse text if enabled
+    if data.use_ai and data.text and ai_service.is_ai_configured():
+        parsed = await ai_service.parse_expense_text(data.text)
+        
+        # Use AI results if manual values not provided
+        if amount is None:
+            amount = parsed["amount"]
+        if description is None:
+            description = parsed["description"]
+        if category_id is None:
+            category_id = await _find_category_id(db, user_id, parsed["category"])
+    
+    # Validate we have required fields
+    if amount is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Could not determine amount. Please specify amount manually."
+        )
+    
+    # Parse date
+    from datetime import date as date_type
+    if expense_date_str:
+        expense_date = date_type.fromisoformat(expense_date_str)
+    else:
+        expense_date = date_type.today()
+    
+    # Create expense
+    expense_data = ExpenseCreate(
+        amount=amount,
+        description=description,
+        category_id=category_id,
+        expense_date=expense_date,
+    )
+    
+    expense = await expense_service.create_expense(db, user_id, expense_data)
+    return _expense_to_response(expense)

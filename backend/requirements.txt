@@ -19,6 +19,10 @@ pydantic-settings
 # HTTP Client (for WhatsApp/SMS APIs)
 httpx
 
+# AI / Gemini
+google-genai
+Pillow  # For image processing
+
 # Testing
 pytest
 pytest-asyncio
