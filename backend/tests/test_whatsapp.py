@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.whatsapp_service import WhatsAppService, settings
 
 client = TestClient(app)
 
@@ -37,3 +38,23 @@ def test_whatsapp_webhook_no_phone():
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ignored"
+
+
+def test_whatsapp_service_uses_global_key_when_set(monkeypatch: pytest.MonkeyPatch):
+    """Use global Evolution API key when configured."""
+    monkeypatch.setattr(settings, "EVOLUTION_API_GLOBAL_KEY", "global-key")
+    monkeypatch.setattr(settings, "EVOLUTION_API_KEY", "instance-key")
+
+    service = WhatsAppService()
+
+    assert service.headers["apikey"] == "global-key"
+
+
+def test_whatsapp_service_falls_back_to_instance_key(monkeypatch: pytest.MonkeyPatch):
+    """Fallback to instance API key when global key is not configured."""
+    monkeypatch.setattr(settings, "EVOLUTION_API_GLOBAL_KEY", "")
+    monkeypatch.setattr(settings, "EVOLUTION_API_KEY", "instance-key")
+
+    service = WhatsAppService()
+
+    assert service.headers["apikey"] == "instance-key"

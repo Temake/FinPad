@@ -19,8 +19,9 @@ class WhatsAppService:
     def __init__(self):
         self.base_url = settings.EVOLUTION_API_URL
         self.instance = settings.EVOLUTION_INSTANCE
+        api_key = settings.EVOLUTION_API_GLOBAL_KEY or settings.EVOLUTION_API_KEY
         self.headers = {
-            "apikey": settings.EVOLUTION_API_KEY,
+            "apikey": api_key,
             "Content-Type": "application/json",
         }
 

@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     # Evolution API (WhatsApp)
     EVOLUTION_API_URL: str = "http://localhost:8080"
     EVOLUTION_INSTANCE: str = "finpad-main"
+    EVOLUTION_API_GLOBAL_KEY: str = ""
     EVOLUTION_API_KEY: str = "change-me"
 
     # SMS Fallback (Termii)
