@@ -20,6 +20,8 @@ class WhatsAppService:
         self.base_url = settings.EVOLUTION_API_URL
         self.instance = settings.EVOLUTION_INSTANCE
         api_key = settings.EVOLUTION_API_GLOBAL_KEY or settings.EVOLUTION_API_KEY
+        if not api_key:
+            raise ValueError("Evolution API key is not configured")
         self.headers = {
             "apikey": api_key,
             "Content-Type": "application/json",

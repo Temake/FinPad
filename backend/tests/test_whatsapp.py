@@ -58,3 +58,12 @@ def test_whatsapp_service_falls_back_to_instance_key(monkeypatch: pytest.MonkeyP
     service = WhatsAppService()
 
     assert service.headers["apikey"] == "instance-key"
+
+
+def test_whatsapp_service_raises_when_no_keys(monkeypatch: pytest.MonkeyPatch):
+    """Fail fast when no Evolution API key is configured."""
+    monkeypatch.setattr(settings, "EVOLUTION_API_GLOBAL_KEY", "")
+    monkeypatch.setattr(settings, "EVOLUTION_API_KEY", "")
+
+    with pytest.raises(ValueError, match="Evolution API key is not configured"):
+        WhatsAppService()
