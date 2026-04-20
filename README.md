@@ -41,6 +41,13 @@ docker-compose up -d
 
 This starts PostgreSQL, Redis, and Evolution API.
 
+### Evolution API quick notes
+
+- Open Manager at `http://localhost:8080/manager`
+- Use the same API key configured in `EVOLUTION_API_KEY` (default: `change-me`)
+- Create/connect an instance and set your backend `EVOLUTION_INSTANCE` to that exact instance name
+- If Manager shows disconnected or QR does not render, run `docker compose pull evolution-api && docker compose up -d evolution-api`
+
 ### 3. Backend
 
 ```bash

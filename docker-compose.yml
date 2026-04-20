@@ -25,13 +25,17 @@ services:
 
   # Evolution API (WhatsApp Gateway)
   evolution-api:
-    image: atendai/evolution-api:latest
+    image: evoapicloud/evolution-api:v2.3.1
     container_name: finpad_evolution
     restart: unless-stopped
     ports:
       - "8080:8080"
     environment:
       - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:-change-me}
+      - SERVER_URL=${EVOLUTION_SERVER_URL:-http://localhost:8080}
+      - CORS_ORIGIN=${EVOLUTION_CORS_ORIGIN:-*}
+      - WEBSOCKET_ENABLED=true
+      - WEBSOCKET_GLOBAL_EVENTS=true
       - DATABASE_ENABLED=true
       - DATABASE_PROVIDER=postgresql
       - DATABASE_CONNECTION_URI=postgresql://finpad:finpad@db:5432/finpad
@@ -43,7 +47,6 @@ services:
     volumes:
       - evolution_instances:/evolution/instances
     depends_on:
-      - db
       - redis
 
 volumes:
