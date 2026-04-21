@@ -1,37 +1,69 @@
 services:
   # PostgreSQL Database
   db:
-    image: postgres:16-alpine
-    container_name: finpad_db
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: ${POSTGRES_CONTAINER_NAME:-finpad_db}
     restart: unless-stopped
+    env_file:
+      - ./.env
     environment:
-      POSTGRES_USER: finpad
-      POSTGRES_PASSWORD: finpad
-      POSTGRES_DB: finpad
+      POSTGRES_USER: ${POSTGRES_USER:-finpad}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finpad}
+      POSTGRES_DB: ${POSTGRES_DB:-finpad}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
   # Redis Cache
   redis:
-    image: redis:7-alpine
-    container_name: finpad_redis
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    container_name: ${REDIS_CONTAINER_NAME:-finpad_redis}
     restart: unless-stopped
+    env_file:
+      - ./.env
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
 
+  # FinPad Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ${BACKEND_IMAGE:-finpad-backend:latest}
+    container_name: ${BACKEND_CONTAINER_NAME:-finpad_backend}
+    restart: unless-stopped
+    working_dir: /app
+    env_file:
+      - ./.env
+      - ./backend/.env
+    environment:
+      DATABASE_URL: ${BACKEND_DATABASE_URL:-postgresql+asyncpg://finpad:finpad@db:5432/finpad}
+      REDIS_URL: ${BACKEND_REDIS_URL:-redis://redis:6379/0}
+      EVOLUTION_API_URL: ${BACKEND_EVOLUTION_API_URL:-http://evolution-api:8080}
+      EVOLUTION_API_KEY: ${AUTHENTICATION_API_KEY:-change-me}
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    volumes:
+      - ./backend:/app
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      - db
+      - redis
+
   # Evolution API (WhatsApp Gateway)
   evolution-api:
-    image: evoapicloud/evolution-api:v2.3.1
-    container_name: finpad_evolution
+    image: ${EVOLUTION_IMAGE:-evoapicloud/evolution-api:v2.3.1}
+    container_name: ${EVOLUTION_CONTAINER_NAME:-finpad_evolution}
     restart: unless-stopped
+    env_file:
+      - ./.env
     ports:
-      - "8080:8080"
+      - "${EVOLUTION_PORT:-8080}:8080"
     environment:
-      - AUTHENTICATION_API_KEY=${EVOLUTION_API_KEY:-change-me}
+      - AUTHENTICATION_API_KEY=${AUTHENTICATION_API_KEY:-change-me}
       - SERVER_URL=${EVOLUTION_SERVER_URL:-http://localhost:8080}
       - CORS_ORIGIN=${EVOLUTION_CORS_ORIGIN:-*}
       - WEBSOCKET_ENABLED=true
@@ -47,7 +79,9 @@ services:
     volumes:
       - evolution_instances:/evolution/instances
     depends_on:
+      - db
       - redis
+      - backend
 
 volumes:
   postgres_data:

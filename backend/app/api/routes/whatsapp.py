@@ -206,6 +206,14 @@ async def whatsapp_webhook(request: Request, db: DbSession):
     if event != "messages.upsert":
         return {"status": "ignored", "event": event}
 
+    # Ignore messages sent by us (prevent self-reply loops)
+    try:
+        from_me = data.get("data", {}).get("key", {}).get("fromMe", False)
+        if from_me:
+            return {"status": "ignored", "reason": "fromMe"}
+    except (KeyError, AttributeError):
+        pass
+
     phone = _extract_phone_from_webhook(data)
     message_text = _extract_message_text(data)
     whatsapp_id = _extract_whatsapp_id(data)

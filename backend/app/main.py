@@ -14,13 +14,13 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     # Startup
-    print(f"🚀 Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    print(f"📍 Environment: {settings.ENVIRONMENT}")
+    print(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
+    print(f"Environment: {settings.ENVIRONMENT}")
     await init_redis(settings.REDIS_URL)
     yield
     # Shutdown
     await close_redis()
-    print(f"👋 Shutting down {settings.APP_NAME}")
+    print(f"Shutting down {settings.APP_NAME}")
 
 
 app = FastAPI(

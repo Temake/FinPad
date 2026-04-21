@@ -1,8 +1,10 @@
 """WhatsApp messaging service via Evolution API."""
 
+import logging
 import httpx
 from app.core.config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
@@ -33,15 +35,24 @@ class WhatsAppService:
             "text": message,
         }
 
+        url = f"{self.base_url}/message/sendText/{self.instance}"
+
         try:
             async with httpx.AsyncClient(timeout=15) as client:
                 response = await client.post(
-                    f"{self.base_url}/message/sendText/{self.instance}",
+                    url,
                     json=payload,
                     headers=self.headers,
                 )
-                return response.status_code == 200
-        except httpx.RequestError:
+                if response.status_code != 200:
+                    logger.error(
+                        f"WhatsApp send failed: {response.status_code} - {response.text}"
+                    )
+                    return False
+                logger.info(f"WhatsApp message sent to {formatted_phone}")
+                return True
+        except httpx.RequestError as e:
+            logger.error(f"WhatsApp request error to {url}: {e}")
             return False
 
     async def send_otp(self, phone: str, otp: str) -> bool:
