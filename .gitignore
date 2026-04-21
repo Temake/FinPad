@@ -22,6 +22,7 @@ env/
 .idea/
 *.swp
 *.swo
+backend_review.md
 
 # OS
 .DS_Store
