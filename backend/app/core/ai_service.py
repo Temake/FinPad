@@ -99,7 +99,9 @@ def _get_client():
         raise ValueError("GEMINI_API_KEY not configured")
     return _client
 
-
+def _parse_welcome_message():
+    pass
+    
 def _parse_json_response(text: str) -> dict:
     """Extract and parse JSON from Gemini response."""
     # Try to find JSON in the response
