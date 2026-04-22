@@ -237,7 +237,7 @@ async def whatsapp_webhook(request: Request, db: DbSession):
     # New user — registration flow
     if phone in _pending_registrations:
         # They were asked to confirm — check for YES
-        if message_text.upper() in ("YES", "Y", "YEAH", "YEP", "OK", "OKAY"):
+        if message_text.upper() in ("YES", "Y", "YEAH", "YEP", "OK", "OKAY","SURE"):
             _pending_registrations.discard(phone)
 
             # Create account — no OTP needed (WhatsApp already verified)
