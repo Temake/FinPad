@@ -2,55 +2,54 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 from functools import lru_cache
 from typing import Literal
+# from dotenv import 
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
 
-    # App
-    APP_NAME: str = "FinPad"
-    APP_VERSION: str = "0.1.0"
-    DEBUG: bool = False
-    ENVIRONMENT: Literal["development", "staging", "production"] = "development"
+    APP_NAME: str = Field(...)
+    APP_VERSION: str = Field(...)
+    DEBUG: bool = Field(...)
+    ENVIRONMENT: Literal["development", "staging", "production"] = Field(...)
 
     # API
-    API_V1_PREFIX: str = "/api/v1"
-    CORS_ORIGINS: list[str] = ["http://localhost:5173"]  # Vite dev server
+    API_V1_PREFIX: str = Field(...)
+    CORS_ORIGINS: list[str] = Field(...)  # Vite dev server
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://finpad:finpad@localhost:5432/finpad"
+    DATABASE_URL: str = Field(...)
 
     # Redis
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = Field(...)
 
     # JWT Auth
-    JWT_SECRET_KEY: str = "change-me-in-production"
-    JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    JWT_SECRET_KEY: str = Field(...)
+    JWT_ALGORITHM: str = Field(...)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(...)  # 24 hours
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(...)
 
     # OTP
-    OTP_EXPIRE_MINUTES: int = 10
-    OTP_LENGTH: int = 6
+    OTP_EXPIRE_MINUTES: int = Field(...)
+    OTP_LENGTH: int = Field(...)
 
     # Evolution API (WhatsApp)
-    EVOLUTION_API_URL: str = "http://localhost:8080"
-    EVOLUTION_INSTANCE: str = "finpad-main"
-    EVOLUTION_API_KEY: str = "change-me"
+    EVOLUTION_API_URL: str = Field(...)
+    EVOLUTION_INSTANCE: str = Field(...)
+    EVOLUTION_API_KEY: str = Field(...)
 
     # SMS Fallback (Termii)
-    TERMII_API_KEY: str = ""
-    TERMII_SENDER_ID: str = "FinPad"
+    TERMII_API_KEY: str = Field(...)
+    TERMII_SENDER_ID: str = Field(...)
 
     # S3 / Object Storage (for receipt images)
-    S3_ENDPOINT: str = ""
-    S3_ACCESS_KEY: str = ""
-    S3_SECRET_KEY: str = ""
-    S3_BUCKET: str = "finpad-receipts"
+    S3_ENDPOINT: str = Field(...)
+    S3_ACCESS_KEY: str = Field(...)
+    S3_SECRET_KEY: str = Field(...)
+    S3_BUCKET: str = Field(...)
 
     # AI / Gemini
-    GEMINI_API_KEY: str = ""
-    AI_MODEL: str = "gemini-2.5-preview"  # Fast and cheap, good for parsing
+    GEMINI_API_KEY: str = Field(...)
+    AI_MODEL: str = Field(...)  # Fast and cheap, good for parsing
 
     model_config = {
         "env_file": ".env",
