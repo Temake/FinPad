@@ -23,7 +23,7 @@ env/
 *.swp
 *.swo
 backend_review.md
-
+update.md
 # OS
 .DS_Store
 Thumbs.db

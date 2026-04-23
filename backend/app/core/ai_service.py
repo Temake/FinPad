@@ -37,6 +37,10 @@ DEFAULT_CATEGORIES = [
     "Other",
 ]
 
+MAX_PARSED_AMOUNT = 100_000_000.0
+MAX_PARSED_DESCRIPTION_LENGTH = 200
+AI_PARSE_MIN_CONFIDENCE = 0.55
+
 
 class ParsedExpense(TypedDict):
     """Structured expense data extracted by AI."""
@@ -121,6 +125,42 @@ def _parse_json_response(text: str) -> dict:
     raise ValueError(f"Could not parse JSON from response: {text}")
 
 
+def _normalize_category(category: str | None, categories: list[str]) -> str:
+    """Map category values to known categories (case-insensitive), else Other."""
+    if not category:
+        return "Other"
+
+    lookup = {c.lower(): c for c in categories}
+    return lookup.get(str(category).strip().lower(), "Other")
+
+
+def _validate_ai_parsed_result(result: dict, categories: list[str], fallback_text: str) -> ParsedExpense | None:
+    """Treat AI output as untrusted and accept only strictly valid parsed expense data."""
+    try:
+        amount_raw = result.get("amount")
+        amount = float(amount_raw) if amount_raw is not None else None
+        if amount is None or amount <= 0 or amount > MAX_PARSED_AMOUNT:
+            return None
+
+        confidence = float(result.get("confidence", 0.0))
+        if confidence < AI_PARSE_MIN_CONFIDENCE or confidence > 1.0:
+            return None
+
+        description = (result.get("description") or fallback_text).strip()
+        description = description[:MAX_PARSED_DESCRIPTION_LENGTH]
+
+        category = _normalize_category(result.get("category"), categories)
+
+        return ParsedExpense(
+            amount=amount,
+            description=description,
+            category=category,
+            confidence=confidence,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
 async def parse_expense_text(text: str, custom_categories: list[str] | None = None) -> ParsedExpense:
     """
     Parse natural language expense description into structured data.
@@ -134,9 +174,9 @@ async def parse_expense_text(text: str, custom_categories: list[str] | None = No
     """
     categories = custom_categories or DEFAULT_CATEGORIES
     
-    # Quick fallback for common patterns without AI
+    # Deterministic parser is primary for reliability and predictable behavior.
     quick_result = _quick_parse(text)
-    if quick_result and quick_result.get("confidence", 0) > 0.8:
+    if quick_result and quick_result.get("amount"):
         return quick_result
     
     # Use Gemini for complex parsing
@@ -155,19 +195,23 @@ async def parse_expense_text(text: str, custom_categories: list[str] | None = No
         
         result = _parse_json_response(response.text)
         
-        # Validate and normalize
+        validated = _validate_ai_parsed_result(result, categories, text)
+        if validated:
+            return validated
+
+        logger.warning("AI output rejected by strict validation rules")
         return ParsedExpense(
-            amount=float(result.get("amount")) if result.get("amount") else None,
-            description=result.get("description"),
-            category=result.get("category", "Other"),
-            confidence=float(result.get("confidence", 0.5)),
+            amount=None,
+            description=text[:MAX_PARSED_DESCRIPTION_LENGTH],
+            category="Other",
+            confidence=0.3,
         )
         
     except Exception as e:
         logger.warning(f"AI parsing failed: {e}, using fallback")
-        return _quick_parse(text) or ParsedExpense(
+        return quick_result or _quick_parse(text) or ParsedExpense(
             amount=None,
-            description=text,
+            description=text[:MAX_PARSED_DESCRIPTION_LENGTH],
             category="Other",
             confidence=0.3,
         )
@@ -284,7 +328,6 @@ async def suggest_category(description: str, amount: float | None = None) -> tup
     """
     result = await parse_expense_text(description)
     return result["category"], result["confidence"]
-
 
 # Health check for AI service
 def is_ai_configured() -> bool:

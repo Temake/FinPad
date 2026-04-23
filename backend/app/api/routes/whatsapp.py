@@ -1,12 +1,16 @@
 """WhatsApp webhook routes - handles incoming messages from Evolution API."""
 
+import json
 import logging
+import re
+import time
 from datetime import date
 
 from fastapi import APIRouter, Request
 
 from app.api.deps import DbSession
 from app.core.ai_service import parse_expense_text
+from app.core.redis import get_redis
 from app.models.expense import ExpenseSource
 from app.services.expense_service import (
     create_expense,
@@ -23,6 +27,143 @@ router = APIRouter()
 
 # Track users mid-registration (awaiting YES confirmation)
 _pending_registrations: set[str] = set()
+_processed_message_ids: set[str] = set()
+
+PENDING_REGISTRATION_TTL_SECONDS = 15 * 60
+PROCESSED_MESSAGE_TTL_SECONDS = 24 * 60 * 60
+CONFIRMATION_WORDS = {"YES", "Y", "YEAH", "YEP", "OK", "OKAY"}
+MAX_WEBHOOK_PAYLOAD_BYTES = 64 * 1024
+MAX_MESSAGE_TEXT_CHARS = 1000
+RATE_LIMIT_WINDOW_SECONDS = 60
+RATE_LIMIT_MAX_MESSAGES = 30
+
+_rate_limit_tracker: dict[str, dict[str, float]] = {}
+
+
+def _pending_key(phone: str) -> str:
+    return f"whatsapp:pending_registration:{phone}"
+
+
+def _processed_message_key(message_id: str) -> str:
+    return f"whatsapp:processed_message:{message_id}"
+
+
+def _canonicalize_text(value: str) -> str:
+    """Normalize text for safe intent matching across punctuation and emoji."""
+    upper = value.upper().strip()
+    upper = re.sub(r"[^A-Z0-9\s]", " ", upper)
+    return " ".join(upper.split())
+
+
+def _is_confirmation_yes(message_text: str) -> bool:
+    """Check if a confirmation reply means YES after canonicalization."""
+    normalized = _canonicalize_text(message_text)
+    if not normalized:
+        return False
+    tokens = normalized.split()
+    if not tokens:
+        return False
+    return normalized in CONFIRMATION_WORDS or tokens[0] in CONFIRMATION_WORDS
+
+
+async def _set_pending_registration(phone: str) -> None:
+    """Persist pending registration state with TTL, fallback to in-memory set."""
+    redis = get_redis()
+    if redis:
+        await redis.set(_pending_key(phone), "1", ex=PENDING_REGISTRATION_TTL_SECONDS)
+    else:
+        _pending_registrations.add(phone)
+
+
+async def _has_pending_registration(phone: str) -> bool:
+    """Check if registration confirmation is pending for a phone number."""
+    redis = get_redis()
+    if redis:
+        return await redis.exists(_pending_key(phone)) > 0
+    return phone in _pending_registrations
+
+
+async def _clear_pending_registration(phone: str) -> None:
+    """Clear pending registration state in both Redis and fallback memory."""
+    redis = get_redis()
+    if redis:
+        await redis.delete(_pending_key(phone))
+    _pending_registrations.discard(phone)
+
+
+def _extract_message_id(data: dict) -> str | None:
+    """Extract unique message ID for idempotency checks."""
+    try:
+        if "data" in data:
+            key = data["data"].get("key", {})
+            msg_id = key.get("id")
+            if msg_id and isinstance(msg_id, str):
+                return msg_id
+        return None
+    except (KeyError, AttributeError):
+        return None
+
+
+async def _is_processed_message(message_id: str) -> bool:
+    """Check if message has already been handled."""
+    redis = get_redis()
+    if redis:
+        return await redis.exists(_processed_message_key(message_id)) > 0
+    return message_id in _processed_message_ids
+
+
+async def _mark_processed_message(message_id: str) -> None:
+    """Mark a message as processed with expiry to prevent replay effects."""
+    redis = get_redis()
+    if redis:
+        await redis.set(_processed_message_key(message_id), "1", ex=PROCESSED_MESSAGE_TTL_SECONDS)
+    else:
+        _processed_message_ids.add(message_id)
+
+
+def _is_valid_message_event_shape(data: dict) -> bool:
+    """Validate minimum required payload structure before deeper processing."""
+    if not isinstance(data, dict):
+        return False
+    if data.get("event") != "messages.upsert":
+        return True
+
+    payload = data.get("data")
+    if not isinstance(payload, dict):
+        return False
+
+    key = payload.get("key")
+    message = payload.get("message")
+
+    if key is not None and not isinstance(key, dict):
+        return False
+    if message is not None and not isinstance(message, dict):
+        return False
+    return True
+
+
+def _rate_limit_key(source: str) -> str:
+    return f"whatsapp:ingress_rate:{source}"
+
+
+async def _is_rate_limited(source: str) -> bool:
+    """Basic per-source sliding-window limit with Redis and in-memory fallback."""
+    redis = get_redis()
+    if redis:
+        key = _rate_limit_key(source)
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, RATE_LIMIT_WINDOW_SECONDS)
+        return count > RATE_LIMIT_MAX_MESSAGES
+
+    now = time.time()
+    state = _rate_limit_tracker.get(source)
+    if not state or (now - state["window_start"]) >= RATE_LIMIT_WINDOW_SECONDS:
+        _rate_limit_tracker[source] = {"window_start": now, "count": 1}
+        return False
+
+    state["count"] += 1
+    return state["count"] > RATE_LIMIT_MAX_MESSAGES
 
 
 def _extract_phone_from_webhook(data: dict) -> str | None:
@@ -198,75 +339,123 @@ async def whatsapp_webhook(request: Request, db: DbSession):
     - New user registration (no OTP - just YES confirmation)
     - Message routing for registered users (Phase 5 will expand this)
     """
-    data = await request.json()
+    try:
+        raw_body = await request.body()
+        if len(raw_body) > MAX_WEBHOOK_PAYLOAD_BYTES:
+            return {"status": "ignored", "reason": "payload_too_large"}
+
+        data = json.loads(raw_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        logger.warning("WhatsApp webhook received invalid JSON payload")
+        return {"status": "ignored", "reason": "invalid_json"}
+    except Exception:
+        logger.warning("WhatsApp webhook body could not be read")
+        return {"status": "ignored", "reason": "invalid_payload"}
+
     logger.debug(f"WhatsApp webhook received: {data}")
 
-    # Only process message events
-    event = data.get("event")
-    if event != "messages.upsert":
-        return {"status": "ignored", "event": event}
-
-    # Ignore messages sent by us (prevent self-reply loops)
     try:
+        # Only process message events
+        event = data.get("event")
+        if event != "messages.upsert":
+            return {"status": "ignored", "event": event}
+
+        if not _is_valid_message_event_shape(data):
+            return {"status": "ignored", "reason": "malformed_event_payload"}
+
+        # Ignore messages sent by us (prevent self-reply loops)
         from_me = data.get("data", {}).get("key", {}).get("fromMe", False)
         if from_me:
             return {"status": "ignored", "reason": "fromMe"}
-    except (KeyError, AttributeError):
-        pass
 
-    phone = _extract_phone_from_webhook(data)
-    message_text = _extract_message_text(data)
-    whatsapp_id = _extract_whatsapp_id(data)
+        message_id = _extract_message_id(data)
+        if message_id and await _is_processed_message(message_id):
+            return {"status": "ignored", "reason": "duplicate_event"}
 
-    if not phone or not message_text:
-        return {"status": "ignored", "reason": "no phone or message"}
+        phone = _extract_phone_from_webhook(data)
+        source = phone or (request.client.host if request.client else "unknown")
+        if await _is_rate_limited(source):
+            return {"status": "ignored", "reason": "rate_limited"}
 
-    message_text = message_text.strip()
-    whatsapp = WhatsAppService()
+        message_text = _extract_message_text(data)
+        whatsapp_id = _extract_whatsapp_id(data)
 
-    # Check if user exists
-    existing_user = await get_user_by_phone(db, phone)
+        if not phone or not message_text:
+            if message_id:
+                await _mark_processed_message(message_id)
+            return {"status": "ignored", "reason": "no phone or message"}
 
-    if existing_user:
-        # User is registered — handle commands
-        response = await _handle_user_message(db, existing_user, message_text, whatsapp)
-        if response:
-            await whatsapp.send_text(phone, response)
-        return {"status": "processed", "user": "existing"}
+        message_text = message_text.strip()
+        if not message_text:
+            if message_id:
+                await _mark_processed_message(message_id)
+            return {"status": "ignored", "reason": "empty_message"}
 
-    # New user — registration flow
-    if phone in _pending_registrations:
-        # They were asked to confirm — check for YES
-        if message_text.upper() in ("YES", "Y", "YEAH", "YEP", "OK", "OKAY"):
-            _pending_registrations.discard(phone)
+        if len(message_text) > MAX_MESSAGE_TEXT_CHARS:
+            if message_id:
+                await _mark_processed_message(message_id)
+            return {"status": "ignored", "reason": "message_too_large"}
 
-            # Create account — no OTP needed (WhatsApp already verified)
-            user, _ = await get_or_create_user(db, phone, whatsapp_id=whatsapp_id)
+        whatsapp = WhatsAppService()
 
-            await whatsapp.send_welcome(phone)
-            logger.info(f"New user registered via WhatsApp: {phone}")
+        # Check if user exists
+        existing_user = await get_user_by_phone(db, phone)
 
-            return {"status": "registered", "phone": phone}
-        else:
-            _pending_registrations.discard(phone)
+        if existing_user:
+            # User is registered — handle commands
+            response = await _handle_user_message(db, existing_user, message_text, whatsapp)
+            if response:
+                await whatsapp.send_text(phone, response)
+            if message_id:
+                await _mark_processed_message(message_id)
+            return {"status": "processed", "user": "existing"}
+
+        # New user — registration flow
+        if await _has_pending_registration(phone):
+            # They were asked to confirm — check for YES
+            if _is_confirmation_yes(message_text):
+                await _clear_pending_registration(phone)
+
+                # Persist registration before sending outbound messages.
+                _, _ = await get_or_create_user(db, phone, whatsapp_id=whatsapp_id)
+                await db.commit()
+
+                welcome_sent = await whatsapp.send_welcome(phone)
+                if not welcome_sent:
+                    logger.warning("User registered but welcome message failed for %s", phone)
+
+                if message_id:
+                    await _mark_processed_message(message_id)
+                logger.info(f"New user registered via WhatsApp: {phone}")
+                return {"status": "registered", "phone": phone, "welcome_sent": welcome_sent}
+
+            await _clear_pending_registration(phone)
             await whatsapp.send_text(
                 phone,
                 "No worries! Send *Hi* anytime if you change your mind. 👋",
             )
+            if message_id:
+                await _mark_processed_message(message_id)
             return {"status": "registration_declined"}
 
-    # First contact — ask to confirm registration
-    _pending_registrations.add(phone)
-    await whatsapp.send_text(
-        phone,
-        f"👋 Welcome to *FinPad*!\n\n"
-        f"I help you track expenses and build smart money habits.\n\n"
-        f"To get started, I'll register you with this WhatsApp number:\n"
-        f"*+{phone}*\n\n"
-        f"Reply *YES* to confirm.",
-    )
+        # First contact — ask to confirm registration
+        await _set_pending_registration(phone)
+        await whatsapp.send_text(
+            phone,
+            f"👋 Welcome to *FinPad*!\n\n"
+            f"I help you track expenses and build smart money habits.\n\n"
+            f"To get started, I'll register you with this WhatsApp number:\n"
+            f"*+{phone}*\n\n"
+            f"Reply *YES* to confirm.",
+        )
+        if message_id:
+            await _mark_processed_message(message_id)
 
-    return {"status": "pending_confirmation", "phone": phone}
+        return {"status": "pending_confirmation", "phone": phone}
+    except Exception:
+        await db.rollback()
+        logger.exception("Error while processing WhatsApp webhook")
+        return {"status": "error", "reason": "processing_failed"}
 
 
 @router.get("/webhook")

@@ -33,18 +33,18 @@ def upgrade() -> None:
 
     # Seed default badges
     op.execute("""
-        INSERT INTO badges (name, description, icon, criteria_type) VALUES
-        ('First Step', 'Logged your first expense', '🎯', 'first_expense'),
-        ('Consistent', '3-day logging streak', '⭐', 'streak_3'),
-        ('On Fire', '7-day logging streak', '🔥', 'streak_7'),
-        ('Two Weeks Strong', '14-day logging streak', '💪', 'streak_14'),
-        ('Monthly Champion', '30-day logging streak', '🏆', 'streak_30'),
-        ('Unstoppable', '60-day logging streak', '🚀', 'streak_60'),
-        ('Legend', '90-day logging streak', '👑', 'streak_90'),
-        ('Getting Started', 'Logged 10 expenses', '📝', 'expenses_10'),
-        ('Dedicated', 'Logged 50 expenses', '📊', 'expenses_50'),
-        ('Centurion', 'Logged 100 expenses', '💯', 'expenses_100'),
-        ('Money Master', 'Logged 500 expenses', '💎', 'expenses_500');
+        INSERT INTO badges (name, description, icon, criteria_type, criteria_value) VALUES
+        ('First Step', 'Logged your first expense', '🎯', 'first_expense', 1),
+        ('Consistent', '3-day logging streak', '⭐', 'streak_3', 3),
+        ('On Fire', '7-day logging streak', '🔥', 'streak_7', 7),
+        ('Two Weeks Strong', '14-day logging streak', '💪', 'streak_14', 14),
+        ('Monthly Champion', '30-day logging streak', '🏆', 'streak_30', 30),
+        ('Unstoppable', '60-day logging streak', '🚀', 'streak_60', 60),
+        ('Legend', '90-day logging streak', '👑', 'streak_90', 90),
+        ('Getting Started', 'Logged 10 expenses', '📝', 'expenses_10', 10),
+        ('Dedicated', 'Logged 50 expenses', '📊', 'expenses_50', 50),
+        ('Centurion', 'Logged 100 expenses', '💯', 'expenses_100', 100),
+        ('Money Master', 'Logged 500 expenses', '💎', 'expenses_500', 500);
     """)
 
     # Seed financial tips (100+ tips covering all categories)
