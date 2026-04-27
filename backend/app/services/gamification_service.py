@@ -57,7 +57,7 @@ async def get_or_create_user_stats(db: AsyncSession, user_id: uuid.UUID) -> User
     if not stats:
         stats = UserStats(user_id=user_id)
         db.add(stats)
-        await db.commit()
+        await db.flush()
         await db.refresh(stats)
     
     return stats
@@ -100,7 +100,7 @@ async def increment_expense_count(
     new_level, _, _ = get_level_for_expenses(stats.total_expenses_logged)
     stats.level = new_level
     
-    await db.commit()
+    await db.flush()
     await db.refresh(stats)
     return stats
 
@@ -154,7 +154,7 @@ async def update_streak(
     if stats.current_streak in milestones and stats.current_streak != old_streak:
         is_milestone = True
     
-    await db.commit()
+    await db.flush()
     await db.refresh(stats)
     return stats, is_milestone
 
@@ -218,7 +218,7 @@ async def award_badge(
     # Award badge
     user_badge = UserBadge(user_id=user_id, badge_id=badge.id)
     db.add(user_badge)
-    await db.commit()
+    await db.flush()
     await db.refresh(user_badge)
     
     # Load badge relationship

@@ -4,8 +4,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
+from app.core.database import async_session_factory
 from app.core.redis import init_redis, close_redis
 from app.api.router import api_router
+from app.services.expense_service import ensure_default_categories
 
 settings = get_settings()
 
@@ -13,14 +15,15 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
-    # Startup
-    print(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    print(f"Environment: {settings.ENVIRONMENT}")
+    print(f"📍 Environment: {settings.ENVIRONMENT}")
     await init_redis(settings.REDIS_URL)
+    async with async_session_factory() as session:
+        await ensure_default_categories(session)
+        await session.commit()
     yield
     # Shutdown
     await close_redis()
-    print(f"Shutting down {settings.APP_NAME}")
+    print(f"👋 Shutting down {settings.APP_NAME}")
 
 
 app = FastAPI(

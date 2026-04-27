@@ -12,6 +12,39 @@ from app.models.expense import Expense, Category, ExpenseSource
 from app.schemas.expense import ExpenseCreate, ExpenseUpdate
 
 
+DEFAULT_CATEGORY_SEED = [
+    {"name": "Food & Groceries", "icon": "🍔", "color": "#FF6B6B"},
+    {"name": "Transport", "icon": "🚗", "color": "#4ECDC4"},
+    {"name": "Airtime & Data", "icon": "📱", "color": "#45B7D1"},
+    {"name": "Bills & Utilities", "icon": "💡", "color": "#96CEB4"},
+    {"name": "Shopping", "icon": "🛍️", "color": "#DDA0DD"},
+    {"name": "Entertainment", "icon": "🎬", "color": "#FFD93D"},
+    {"name": "Health", "icon": "💊", "color": "#6BCB77"},
+    {"name": "Education", "icon": "📚", "color": "#4D96FF"},
+    {"name": "Family & Gifts", "icon": "🎁", "color": "#FF8B94"},
+    {"name": "Savings", "icon": "💰", "color": "#2ECC71"},
+    {"name": "Other", "icon": "📦", "color": "#95A5A6"},
+]
+
+
+async def ensure_default_categories(db: AsyncSession) -> None:
+    """Idempotently restore missing system categories."""
+    result = await db.execute(
+        select(Category.name).where(Category.user_id == None)
+    )
+    existing_names = {name for name in result.scalars().all()}
+
+    missing_categories = [
+        Category(name=item["name"], icon=item["icon"], color=item["color"], is_custom=False)
+        for item in DEFAULT_CATEGORY_SEED
+        if item["name"] not in existing_names
+    ]
+
+    if missing_categories:
+        db.add_all(missing_categories)
+        await db.flush()
+
+
 async def create_expense(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -29,7 +62,11 @@ async def create_expense(
         source=source,
     )
     db.add(expense)
-    await db.commit()
+    # Use flush() instead of commit() — the get_db() dependency auto-commits
+    # when the request completes.  Committing here caused a double-commit that
+    # corrupted the async session, producing the "session error" on expense
+    # logging via WhatsApp.
+    await db.flush()
     await db.refresh(expense)
     return expense
 
@@ -91,7 +128,7 @@ async def update_expense(
     for key, value in update_data.items():
         setattr(expense, key, value)
 
-    await db.commit()
+    await db.flush()
     await db.refresh(expense)
     return expense
 
@@ -105,7 +142,7 @@ async def delete_expense(
         return False
 
     expense.is_deleted = True
-    await db.commit()
+    await db.flush()
     return True
 
 
@@ -175,6 +212,7 @@ async def get_expense_summary(
 
 async def get_all_categories(db: AsyncSession, user_id: uuid.UUID | None = None) -> list[Category]:
     """Get all categories (system + user's custom)."""
+    await ensure_default_categories(db)
     query = select(Category).where(
         (Category.user_id == None) | (Category.user_id == user_id)
     ).order_by(Category.id)
@@ -198,6 +236,6 @@ async def create_custom_category(
         user_id=user_id,
     )
     db.add(category)
-    await db.commit()
+    await db.flush()
     await db.refresh(category)
     return category

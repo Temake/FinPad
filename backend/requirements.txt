@@ -1,31 +1,22 @@
-# FastAPI & Server
+
 fastapi
 uvicorn[standard]
 python-multipart
 
-# Database
 sqlalchemy[asyncio]
 asyncpg
 alembic
 
-# Redis
 redis
-
-# Auth & Security
 python-jose[cryptography]
 passlib[bcrypt]
 pydantic-settings
 
-# HTTP Client (for WhatsApp/SMS APIs)
 httpx
-
-# AI / Gemini
 google-genai
-Pillow  # For image processing
+Pillow  
 
-# Testing
 pytest
 pytest-asyncio
 
-# Dev tools
 python-dotenv==1.0.1

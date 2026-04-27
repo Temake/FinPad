@@ -44,7 +44,9 @@ class WhatsAppService:
                     json=payload,
                     headers=self.headers,
                 )
-                if response.status_code != 200:
+                # Evolution API returns 201 (Created) for successful sends,
+                # not 200.  Accept any 2xx status code as success.
+                if response.status_code >= 300 or response.status_code < 200:
                     logger.error(
                         f"WhatsApp send failed: {response.status_code} - {response.text}"
                     )

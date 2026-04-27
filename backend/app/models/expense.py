@@ -56,7 +56,12 @@ class Expense(Base):
         Integer, ForeignKey("categories.id"), nullable=True
     )
     source: Mapped[ExpenseSource] = mapped_column(
-        Enum(ExpenseSource), default=ExpenseSource.MANUAL
+        Enum(
+            ExpenseSource,
+            name="expense_source",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
+        default=ExpenseSource.MANUAL,
     )
     receipt_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 

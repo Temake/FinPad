@@ -57,7 +57,6 @@ async def request_otp(request: PhoneRequest):
         return {
             "message": "OTP generated but delivery services unavailable. Check server logs for testing.",
             "phone": phone,
-            "debug_otp": otp,  # Remove in production!
         }
 
     return {

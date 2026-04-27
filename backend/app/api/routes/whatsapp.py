@@ -172,9 +172,23 @@ def _extract_phone_from_webhook(data: dict) -> str | None:
         # Evolution API v2 payload structure
         if "data" in data:
             key = data["data"].get("key", {})
+            sender_pn = key.get("senderPn", "")
+            if isinstance(sender_pn, str) and "@" in sender_pn:
+                candidate = sender_pn.split("@")[0]
+                if candidate.isdigit():
+                    return candidate
+
+            participant = key.get("participant", "")
+            if isinstance(participant, str) and participant.endswith("@s.whatsapp.net"):
+                candidate = participant.split("@")[0]
+                if candidate.isdigit():
+                    return candidate
+
             remote_jid = key.get("remoteJid", "")
-            # remoteJid is like "2348012345678@s.whatsapp.net"
-            return remote_jid.split("@")[0] if "@" in remote_jid else None
+            if isinstance(remote_jid, str) and remote_jid.endswith("@s.whatsapp.net"):
+                candidate = remote_jid.split("@")[0]
+                if candidate.isdigit():
+                    return candidate
         return None
     except (KeyError, AttributeError):
         return None
@@ -238,14 +252,25 @@ def _format_summary(summary: dict, period_name: str) -> str:
     return msg
 
 
+# Canonicalized intent tokens for command matching.
+# Using _canonicalize_text strips invisible Unicode characters WhatsApp may
+# inject (zero-width spaces, RTL marks, soft hyphens, etc.) that break simple
+# .lower().strip() comparisons.
+_GREETING_WORDS = {"HI", "HELLO", "HEY", "START", "YO"}
+_HELP_WORDS = {"HELP", "COMMANDS", "MENU"}
+_SUMMARY_TODAY_WORDS = {"SUMMARY", "TODAY"}
+_WEEK_WORDS = {"WEEK", "WEEKLY"}
+_MONTH_WORDS = {"MONTH", "MONTHLY"}
+
+
 async def _handle_user_message(db, user, message_text: str, whatsapp: WhatsAppService) -> str | None:
     """Process a message from a registered user and return response."""
-    text_lower = message_text.lower().strip()
+    canon = _canonicalize_text(message_text)
     name = user.display_name or ""
     greeting = f" {name}" if name else ""
 
     # Greetings
-    if text_lower in ("hi", "hello", "hey", "start", "yo"):
+    if canon in _GREETING_WORDS:
         return (
             f"👋 Hey{greeting}! Ready to track your spending?\n\n"
             f"• Send \"Spent 2000 on food\" to log\n"
@@ -254,7 +279,7 @@ async def _handle_user_message(db, user, message_text: str, whatsapp: WhatsAppSe
         )
 
     # Help
-    if text_lower == "help":
+    if canon in _HELP_WORDS:
         return (
             "📋 *FinPad Commands*\n\n"
             "*Log Expenses:*\n"
@@ -269,15 +294,15 @@ async def _handle_user_message(db, user, message_text: str, whatsapp: WhatsAppSe
         )
 
     # Summary commands
-    if text_lower in ("summary", "today"):
+    if canon in _SUMMARY_TODAY_WORDS:
         summary = await get_expense_summary(db, user.id, "daily")
         return _format_summary(summary, "Today's")
 
-    if text_lower == "week":
+    if canon in _WEEK_WORDS:
         summary = await get_expense_summary(db, user.id, "weekly")
         return _format_summary(summary, "This Week's")
 
-    if text_lower == "month":
+    if canon in _MONTH_WORDS:
         summary = await get_expense_summary(db, user.id, "monthly")
         return _format_summary(summary, "This Month's")
 
@@ -322,6 +347,7 @@ async def _handle_user_message(db, user, message_text: str, whatsapp: WhatsAppSe
             )
 
     except Exception as e:
+        await db.rollback()
         logger.error(f"Error processing expense message: {e}")
         return (
             "😅 Oops! Something went wrong.\n\n"
@@ -417,8 +443,12 @@ async def whatsapp_webhook(request: Request, db: DbSession):
                 await _clear_pending_registration(phone)
 
                 # Persist registration before sending outbound messages.
+                # NOTE: Do NOT call db.commit() here — the get_db() dependency
+                # auto-commits when the request finishes successfully.  Calling
+                # commit() manually causes a double-commit that corrupts the
+                # session state and breaks subsequent queries in the same request.
                 _, _ = await get_or_create_user(db, phone, whatsapp_id=whatsapp_id)
-                await db.commit()
+                await db.flush()
 
                 welcome_sent = await whatsapp.send_welcome(phone)
                 if not welcome_sent:
@@ -453,6 +483,9 @@ async def whatsapp_webhook(request: Request, db: DbSession):
 
         return {"status": "pending_confirmation", "phone": phone}
     except Exception:
+        # Explicit rollback IS needed here because we catch the exception and
+        # return a normal JSON response.  Without this, get_db() would try to
+        # auto-commit a session in a broken/dirty state.
         await db.rollback()
         logger.exception("Error while processing WhatsApp webhook")
         return {"status": "error", "reason": "processing_failed"}
